@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <title>七月算法－机器学习课程实验</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <link rel="shortcut icon" href="http://julyedu.com/favicon.ico" type="image/x-icon" />
+
+    <link rel="stylesheet" href="css/lib/bootstrap.min.css">
+    <link rel="stylesheet" href="css/lib/bootstrap-theme.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.structure.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.theme.min.css">
+
+    <link rel="stylesheet" href="css/mystyle.css">
+</head>
+<body>
+
+<blockquote>
+<h2>机器学习课程实验: <small>Random Forest 算法</small></h2>
+</blockquote>
+
+<div class="markdown">
+
+### 1. 随机森林算法说明
+
+随机森林算法是一个非常有效的数据分类和回归算法，属于集成学习算法，常常用来当做顶层算法，融合其他算法。
+最典型的方式是融合CART决策树算法，本实验就是实现一个基于CART决策树的随机森林算法。
+
+#### 1.1 基本算法
+
+随机森林的最核心思想是通过**随机**的方式来构造各种**差异**的“弱”分类器。使用的技巧如下：
+
+* Bagging 方法，用一个**随机**采样集来构造一个单独的树
+* 构造决策树每次split时，选择一组**随机**的特征
+* 构造split策略时，从特征中一定次数的**随机**采样值中，选择最好一个构造split
+
+通过上面的各种随机技巧，可以构造出一组差异较大的弱分类器。
+
+#### 1.2 关键参数
+
+构造基于CART决策树的随机森林算法，主要包括如下参数：
+
++ 构造每棵CART决策树的深度
++ 构造每棵CART决策树，使用Bagging样本数
++ CART决策树的数目
++ 随机采样的次数
+
+
+----
+### 2. 随机森林算法实现
+</div>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 2.1 需要使用到的计算公式
+
+首先需要了解几个公式：
+
+* Gini 指数
+
+$$
+Gini(D) = 1 - \sum_k p_{k}^{2} = 1 - \sum_k{(\frac{C_k}{D})}^2
+$$
+
+* 对样本进行一次划分后的 Gini 指数
+
+CART决策树个节点(不包括叶节点)就是一次样本的二分划分，在某个二分划分的决策A下，新的Gini指数计算如下：
+
+$$
+Gini(D|A) = \frac{D_l}{D} Gini(D_l) + \frac{D_r}{D} Gini(D_r)
+$$
+
+因此每一次的划分(split)操作，都要寻找最小的A，即
+
+$$
+\newcommand{\argmin}{\mathop{\rm arg~min}\limits}
+\argmin_{A} Gini(D|A)
+$$
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+// 计算某个数据集的 Gini指数
+var Gini = function(data) {
+  var classNumber = {};
+
+  for(var i = 0; i < data.length; i++) {
+    if ( classNumber[data[i].y] === undefined){
+      classNumber[data[i].y] = 1;
+    } else {
+      classNumber[data[i].y] ++;
+    }
+  }
+
+  var sum = 0;
+  var winClass = null;
+  var winNumber = 0;
+  for(var k in classNumber ) {
+    sum = sum + classNumber[k] * classNumber[k] / data.length / data.length;
+    if ( classNumber[k] > winNumber){
+        winClass = k;
+        winNumber = classNumber[k];
+    }
+  }
+  return {value:1 - sum, 'winClass':winClass};
+};
+
+var splitGini = function(left, right) {
+    var totalNumber = left.length + right.length;
+    var sum =  left.length/totalNumber * Gini(left).value +
+               right.length/totalNumber * Gini(right).value;
+
+    return sum;
+};
+
+// 定义两个辅助函数
+// 生成 (a,b) 之间的浮点数
+function randf(a, b) {
+  return Math.random()*(b-a)+a;
+}
+
+// 生成 [a, b) 之间的整数
+function randi(a, b) {
+   return Math.floor(Math.random()*(b-a)+a);
+}
+
+    </pre>
+  </div>
+
+</div>
+
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 2.2 构造单一的随机CART树
+
+很明显构造一颗树需要的参数包括：
+
+* 经过Bagging方式采样的样本集
+* CART树的深度
+
+我们可以采用最简单的数组来表示一颗完全二叉树, 每个节点记录选择的Feature以及对应的split值。
+
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+
+// 从样本中根据指定的feature生成一个随机的划分决策 A
+var randomSplit = function(data, feature)  {
+    // 随机选择两个不同的样本
+    var a = randi(0, data.length);
+    var b = randi(0, data.length);
+    while ( a === b) {
+      b = randi(0, data.length);
+    }
+
+    // 返回一个 a b 之间的随机值
+    var s = Math.random();
+    var splitValue = s * data[a].x[feature] + (1-s) * data[b].x[feature];
+
+    var subTree = {};
+    subTree.splitValue = splitValue;
+    subTree.left = [];
+    subTree.right = [];
+    for(var i = 0; i < data.length; i++) {
+        if ( data[i].x[feature] > splitValue ) {
+            subTree.right.push(data[i]);
+        } else {
+            subTree.left.push(data[i]);
+        }
+    }
+    return subTree;
+};
+
+// 构造单一树实现
+var createSingleTree = function (data, depth, bestSelect) {
+    var featureNumber = data[0].x.length;
+    var allNumber = Math.pow(2, depth + 1) - 1;   // 包含叶节点的数目
+    var nodeNumber = Math.pow(2, depth) - 1;      // 非叶节点数目
+
+    // 首先构造初始树
+    var tree = [];
+    for(var i = 0; i < allNumber; i++) {
+        tree[i] = {};
+        tree[i].samples = [];
+    }
+    for(var i = 0; i < data.length; i++) {
+        tree[0].samples.push(data[i]);
+    }
+
+    // 构造每个节点
+    for(var i = 0; i < nodeNumber; i++) {
+        var samples = tree[i].samples;
+        if ( samples.length === 0 || samples.length === 1) {
+            continue;
+        }
+
+        var feature = randi(0, featureNumber);   //随机选择一个feature
+        var bestTree = null;
+        var bestGini = Gini( samples ).value;
+        for(var j = 0; j < bestSelect && bestGini > 0; j++) {
+            var subTree = randomSplit(samples, feature);
+            var newGini = splitGini(subTree.left, subTree.right);
+            if ( newGini < bestGini ) {     // 选择最好的决策
+                bestGini = newGini;
+                bestTree = subTree;
+            }
+        }
+        if ( bestTree !== null ) {
+            tree[i].splitValue = bestTree.splitValue;
+            tree[i].splitFeature = feature;
+            tree[i*2+1].samples = bestTree.left;
+            tree[i*2+2].samples = bestTree.right;
+        }
+    }
+
+    // 为了实现快速分类，我们给每个叶节点分配一个分类属性
+    for(var i = 0; i < allNumber; i++) {
+        if ( tree[i].splitValue === undefined && tree[i].samples.length > 0) {
+            tree[i].winClass = Gini(tree[i].samples).winClass;
+        }
+    }
+    return tree;
+}
+    </pre>
+  </div>
+
+</div>
+
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 2.3 构造完整的森林
+
+现在可以构造完整的随机森林算法，包括如何应用随机森林算法。
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+
+var createForest = function(data, option) {
+    var treeNumber = option.treeNumber;     // 总体树的数目
+    var bagNumber = option.bagNumber;       // Bagging操作的样本数目
+    var depth = option.depth;               // 单棵树的深度
+    var bestSelect = option.bestSelect;     // 选择策略的随机采样次数
+
+    var forest = [];
+    for (var i = 0; i < treeNumber; i++) {
+        var subData = bagging(data, bagNumber);
+        forest[i] = createSingleTree(subData, depth, bestSelect);
+    }
+    return forest;
+};
+
+var bagging = function(data, bagNumber) {
+    var bag = [];
+    for( var i = 0; i < bagNumber; i++) {
+        var n = randi(0, data.length);
+        bag.push( data[n]);
+    }
+    return bag;
+};
+
+// 如何利用RF来做分类预测
+var predWithTree = function(tree, x) {
+    for(var i = 0; ; ) {
+        if (i >= tree.length) {
+            return null;
+        }
+
+        if ( tree[i].winClass !== undefined )  {
+            return tree[i].winClass;
+        }
+
+        if ( x[ tree[i].splitFeature] < tree[i].splitValue ) {
+            i = 2*i + 1;
+        } else {
+            i = 2*i + 2;
+        }
+    }
+};
+
+var predWithForest = function(forest, x) {
+  var classNumber = {};
+
+  for(var i = 0; i < forest.length; i++) {
+      var pred = predWithTree(forest[i], x);
+      if ( pred !== null ) {
+        if ( classNumber[pred] === undefined){
+          classNumber[pred] = 1;
+        } else {
+          classNumber[pred] ++;
+        }
+      }
+  }
+
+  var winClass = null;
+  var winNumber = 0;
+  for(var k in classNumber ) {
+    if ( classNumber[k] > winNumber){
+        winClass = k;
+        winNumber = classNumber[k];
+    }
+  }
+
+  return {'winClass': winClass, prob: classNumber[winClass] };
+};
+    </pre>
+  </div>
+</div>
+
+<div class="markdown">
+---
+### 3. RF 实现验证
+
+下面将以一个二维简单例子来测试我们的实现代码。
+测试代码：
+</div>
+
+<div class="row">
+  <div class="col-xs-12 col-md-5">
+
+    <div class="btn-toolbar" role="toolbar">
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-warning btn-sm" id="btnClear">清空</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-info btn-sm" id="btnLabel1">样本：1</button>
+        <button type="button" class="btn btn-info btn-sm" id="btnLabel2">样本：2</button>
+        <button type="button" class="btn btn-info btn-sm" id="btnLabel3">样本：3</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-primary btn-sm" id="btnTest">测试</button>
+      </div>
+    </div>
+    <div class="well" style="margin-top:5px;">
+      <div style="width:360px;height:360px:margin:0px">
+        <canvas id="dataFrame" style="width:360px;height:360px">
+        </canvas>
+      </div>
+    </div>
+
+    <div class="markdown">
+
+实验项目：
+
++ 1. 简单二分类/三分类实验
++ 2. 如何调参数？
++ 3. 如何应对 unblance 的数据
++ 4. 如何应对存在 outlier 数据
++ 5. 对大批量的数据，可以实现分布式优化嘛？
+
+逻辑回归 vs SVM vs 随机森林 ？
+
+    </div>
+
+  </div>
+  <div class="col-xs-12 col-md-7">
+    <div class="well kernel">
+      <pre>
+
+var doTest = function() {
+    option = {};
+
+    option.treeNumber = 32;
+    option.bagNumber = g.samples.length;
+    option.depth = 4;
+    option.bestSelect = 10;
+
+    var forest = createForest(g.samples, option);
+
+    var result = {};
+    for(var x = -23; x <= 23; x += 1) {
+      for(var y = -23; y <= 23; y += 1) {
+          var sample = [x/10, y/10];
+          var pred = predWithForest(forest, sample);
+          result[x/10 + ',' + y/10] = pred;
+      }
+    }
+    return result;
+}
+
+      </pre>
+    </div>
+
+  </div>
+</div>
+
+</body>
+
+<script type="text/javascript" src="js/lib/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="js/lib/jquery-ui-1.11.4.min.js"></script>
+<script type="text/javascript" src="js/lib/ace/ace.js"></script>
+<script type="text/javascript" src="js/lib/remarkable.js"></script>
+<script type="text/javascript" src="js/lib/d3.min.js"></script>
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG">
+</script>
+<script type="text/javascript" src="js/index.js"></script>
+<script type="text/javascript" src="data/titanic/trainData.js"></script>
+<script type="text/javascript" src="data/titanic/testData.js"></script>
+<script type="text/javascript">
+var g = {};
+g.samples = [];
+
+var gui = {};
+gui.currentValue = 1;
+
+gui.init = function() {
+  gui.canvas = document.getElementById("dataFrame");
+  gui.canvas.width = 360;
+  gui.canvas.height = 360;
+  gui.ctx = document.getElementById("dataFrame").getContext('2d');
+
+  gui.ctx.fillStyle = 'blue';
+  gui.ctx.strokeStyle = '#003300';
+
+  gui.img = new Image();
+  gui.img.src = './images/2dground.png';
+  gui.img.addEventListener("load", function() {
+    gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  }, false);
+
+
+  // 事件
+  document.getElementById("dataFrame").addEventListener('click', gui.onFrameClick, false);
+  $("#btnLabel1").click(function(){
+      gui.currentValue = 1;
+  });
+  $("#btnLabel2").click(function(){
+      gui.currentValue = 2;
+  });
+  $("#btnLabel3").click(function(){
+      gui.currentValue = 3;
+  });
+
+  $("#btnTest").click( function(){
+      var result = doTest();
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+
+      gui.drawResult(result);
+      for(var i = 0; i < g.samples.length; i++) {
+        gui.drawSample( g.samples[i]);
+      }
+  });
+
+  $("#btnClear").click(function(){
+      g.samples = [];
+      gui.currentValue = 1;
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  });
+
+};
+
+gui.drawResult = function(result) {
+    for(var x = -23; x <= 23; x += 1) {
+      for(var y = -23; y <= 23; y += 1) {
+          var pred = result[x/10 + ',' + y/10];
+          if ( pred != undefined) {
+            if ( pred.winClass === '1') {
+               gui.ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            } else if ( pred.winClass === '2') {
+               gui.ctx.fillStyle = "rgba(0, 255, 0, 0.3)";
+            } else if ( pred.winClass === '3') {
+               gui.ctx.fillStyle = "rgba(0, 0, 255, 0.3)";
+            }
+
+            var wid = 0.1 / 4.8 * gui.canvas.width;
+            var hei = 0.1 / 4.8 * gui.canvas.height;
+            var xx = (x/10 - 0.05 + 2.4 ) * gui.canvas.width / 4.8;
+            var yy = (2.4 - y/10 + 0.05 ) * gui.canvas.height / 4.8;
+            gui.ctx.fillRect(xx, yy, wid, hei);
+          }
+      }
+    }
+};
+
+gui.drawSample = function(sample) {
+  if ( sample.y === 1) {
+    gui.ctx.fillStyle = 'red';
+  } else if ( sample.y === 2){
+    gui.ctx.fillStyle = "green";
+  } else if ( sample.y === 3) {
+    gui.ctx.fillStyle = "blue";
+  }
+
+  var xx = (sample.x[0] + 2.4 ) * gui.canvas.width / 4.8;
+  var yy = (2.4 - sample.x[1]) * gui.canvas.height / 4.8;
+
+  gui.ctx.beginPath();
+  gui.ctx.arc(xx, yy, 3, 0, 2 * Math.PI, false);
+  gui.ctx.fill();
+}
+
+gui.onFrameClick = function(evt) {
+  var rect = this.getBoundingClientRect();
+  var x = evt.clientX - rect.left;
+  var y = evt.clientY - rect.top;
+
+  var xx = 4.8 * x / gui.canvas.width  - 2.4;
+  var yy = 2.4 - 4.8 * y / gui.canvas.height;
+
+  var x = [xx, yy];
+  var sample = {'x':x, 'y':gui.currentValue};
+  g.samples.push(sample);
+
+  gui.drawSample(sample);
+};
+</script>
+
+
+</html>

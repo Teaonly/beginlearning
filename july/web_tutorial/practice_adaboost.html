@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <title>七月算法－机器学习课程实验</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <link rel="shortcut icon" href="http://julyedu.com/favicon.ico" type="image/x-icon" />
+
+    <link rel="stylesheet" href="css/lib/bootstrap.min.css">
+    <link rel="stylesheet" href="css/lib/bootstrap-theme.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.structure.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.theme.min.css">
+
+    <link rel="stylesheet" href="css/mystyle.css">
+</head>
+<body>
+
+<blockquote>
+<h2>机器学习课程实验: <small>AdaBoost算法</small></h2>
+</blockquote>
+
+<div class="markdown">
+### 1. AdaBoost算法
+Adaboost算法采用对样本设置权重的方式，构造不同出不同的弱分类器。
+通过加权组合这些弱分类器得到最后的强分类器。
+
+</div>
+
+<div class="well kernel">
+  <pre>
+
+var createBoost = function(samples, number) {
+  var boost = [];
+  var weights = [];
+  for(var i=0; i < g.samples.length; i++) {
+    weights[i] = (1/g.samples.length);
+  }
+
+  // 对每个样本的x0,x1做排序
+  var fseq = [[], []];
+  for(var i = 0; i < g.samples[0].x.length; i++) {
+    fseq[i][0] = g.samples[0].x[i];
+  }
+
+  for(var i = 1; i < g.samples.length; i++) {
+      for(var j = 0; j < g.samples[0].x.length; j++) {
+          insertValue(fseq[j],  g.samples[i].x[j] );
+      }
+  }
+
+  for(var i = 0; i < number; i++) {
+    var bestScore = 0.0;
+    var bestSplit = {f:0, v:0, dir:1};
+
+    // 提前计算总权重
+    var totalWeight = 0.0;
+    for(var j = 0; j < weights.length; j++) {
+      totalWeight += weights[j];
+    }
+
+    // 遍历所有的split
+    var currentSplit = {f:0, v:0, dir:1};
+    for(var j = 0; j < g.samples[0].x.length; j++) {
+        currentSplit.f = j;
+        for(var k = 0; k <= fseq[j].length - 2; k++ ) {
+          var left = fseq[j][k];
+          var right = fseq[j][k+1];
+          var s = Math.random();
+          currentSplit.v = s * left + (1-s) * right;
+
+          // 对每一个split 计算权重下的正确率
+          var score = getScoreBySplit(samples, weights, currentSplit);
+          if ( score > bestScore) {
+            bestScore = score;
+            bestSplit.f = currentSplit.f;
+            bestSplit.v = currentSplit.v;
+            bestSplit.dir = currentSplit.dir;
+          }
+        }
+    }
+
+    //console.log( weights, bestSplit);
+
+    // 根据bestSplit，计算alpha
+    var e = (totalWeight - bestScore) / totalWeight;
+    e = Math.sqrt( (1-e)/e );
+    bestSplit.alpha = Math.log(e);
+    boost.push( bestSplit);
+
+    // 更新权重
+    updateWeight(samples, weights, bestSplit, e);
+  }
+
+  return boost;
+};
+
+// 最后的预测函数G(X)
+var predWithBoost = function(boost, sample) {
+    var totalScore = 0;
+    for (var i = 0; i < boost.length; i++) {
+      var f = boost[i].f;
+      var v = boost[i].v;
+      var dir = boost[i].dir;
+      var alpha = boost[i].alpha;
+
+      if ( sample[f] > v && dir == 1) {
+          totalScore += alpha;
+      } else if (sample[f] < v && dir == -1) {
+          totalScore += alpha;
+      } else {
+          totalScore -= alpha;
+      }
+    }
+    var result = {};
+    if ( totalScore > 0 ) {
+        result.winClass = '1';
+    } else {
+        result.winClass = '-1';
+    }
+
+    return result;
+}
+
+// 对样本进行分类，并且计算权重下的分类正确率
+var getScoreBySplit = function(samples, weights, split) {
+  var f = split.f;
+  var v = split.v;
+
+  // +1 方向
+  var score_p = 0.0;
+  var score_n = 0.0;
+  for(var i = 0; i < samples.length; i++) {
+    if ( samples[i].x[f] > v && samples[i].y == 1 ) {
+      score_p += weights[i];
+    } else if (samples[i].x[f] < v && samples[i].y == -1 ) {
+      score_p += weights[i];
+    } else {
+      score_n += weights[i];
+    }
+  }
+
+
+  if ( score_p > score_n) {
+      split.dir = 1;
+      return score_p;
+  } else {
+      split.dir = -1;
+      return score_n;
+  }
+}
+
+// 权重更新
+var updateWeight = function(samples, weights, split, e) {
+  var f = split.f;
+  var v = split.v;
+  var dir = split.dir;
+
+  for(var i = 0; i < samples.length; i++) {
+    if ( samples[i].x[f] > v && samples[i].y * dir == 1) {
+        weights[i] = weights[i] / e;
+    } else if (samples[i].x[f] < v && samples[i].y * dir == -1) {
+        weights[i] = weights[i] / e;
+    } else {
+        weights[i] = weights[i] * e;
+    }
+  }
+};
+
+// 辅助函数
+var insertValue = function(seq, v) {
+  seq.push(v);
+  for(var i = seq.length-1; i >= 1; i--) {
+    v = seq[i];
+    if ( seq[i-1] > v) {
+      seq[i] = seq[i-1];
+      seq[i-1] = v;
+    }
+  }
+};
+
+  </pre>
+</div>
+
+
+<div class="markdown">
+---
+### 2. Adaboost 实现验证
+
+下面将以一个二维简单例子来测试我们的实现代码。
+测试代码：
+</div>
+
+<div class="row">
+  <div class="col-xs-12 col-md-5">
+
+    <div class="btn-toolbar" role="toolbar">
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-warning btn-sm" id="btnClear">清空</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-info btn-sm" id="btnLabel1">样本：+1</button>
+        <button type="button" class="btn btn-info btn-sm" id="btnLabel2">样本：-1</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-primary btn-sm" id="btnTest">测试</button>
+      </div>
+    </div>
+    <div class="well" style="margin-top:5px;">
+      <div style="width:360px;height:360px:margin:0px">
+        <canvas id="dataFrame" style="width:360px;height:360px">
+        </canvas>
+      </div>
+    </div>
+
+    <div class="markdown">
+
+实验项目：
+
+* 单一的树的性能
+* boost树的性能和组成树的数量的关系
+
+    </div>
+
+  </div>
+  <div class="col-xs-12 col-md-7">
+    <div class="well kernel">
+      <pre>
+
+var doTest = function() {
+    var adaBoost = createBoost(g.samples, 10);
+
+
+    var result = {};
+    for(var x = -23; x <= 23; x += 1) {
+      for(var y = -23; y <= 23; y += 1) {
+          var sample = [x/10, y/10];
+          var pred = predWithBoost(adaBoost, sample);
+          result[x/10 + ',' + y/10] = pred;
+      }
+    }
+    return result;
+}
+
+      </pre>
+    </div>
+
+  </div>
+</div>
+
+</body>
+
+<script type="text/javascript" src="js/lib/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="js/lib/jquery-ui-1.11.4.min.js"></script>
+<script type="text/javascript" src="js/lib/ace/ace.js"></script>
+<script type="text/javascript" src="js/lib/remarkable.js"></script>
+<script type="text/javascript" src="js/lib/d3.min.js"></script>
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG">
+</script>
+<script type="text/javascript" src="js/index.js"></script>
+<script type="text/javascript" src="data/titanic/trainData.js"></script>
+<script type="text/javascript" src="data/titanic/testData.js"></script>
+<script type="text/javascript">
+var g = {};
+g.samples = [];
+
+var gui = {};
+gui.currentValue = 1;
+
+gui.init = function() {
+  gui.canvas = document.getElementById("dataFrame");
+  gui.canvas.width = 360;
+  gui.canvas.height = 360;
+  gui.ctx = document.getElementById("dataFrame").getContext('2d');
+
+  gui.ctx.fillStyle = 'blue';
+  gui.ctx.strokeStyle = '#003300';
+
+  gui.img = new Image();
+  gui.img.src = './images/2dground.png';
+  gui.img.addEventListener("load", function() {
+    gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  }, false);
+
+
+  // 事件
+  document.getElementById("dataFrame").addEventListener('click', gui.onFrameClick, false);
+  $("#btnLabel1").click(function(){
+      gui.currentValue = 1;
+  });
+  $("#btnLabel2").click(function(){
+      gui.currentValue = -1;
+  });
+
+  $("#btnTest").click( function(){
+      var result = doTest();
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+
+      gui.drawResult(result);
+      for(var i = 0; i < g.samples.length; i++) {
+        gui.drawSample( g.samples[i]);
+      }
+  });
+
+  $("#btnClear").click(function(){
+      g.samples = [];
+      gui.currentValue = 1;
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  });
+
+};
+
+gui.drawResult = function(result) {
+    for(var x = -23; x <= 23; x += 1) {
+      for(var y = -23; y <= 23; y += 1) {
+          var pred = result[x/10 + ',' + y/10];
+          if ( pred != undefined) {
+            if ( pred.winClass === '1') {
+               gui.ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            } else if ( pred.winClass === '-1') {
+               gui.ctx.fillStyle = "rgba(0, 255, 0, 0.3)";
+            }
+
+            var wid = 0.1 / 4.8 * gui.canvas.width;
+            var hei = 0.1 / 4.8 * gui.canvas.height;
+            var xx = (x/10 - 0.05 + 2.4 ) * gui.canvas.width / 4.8;
+            var yy = (2.4 - y/10 + 0.05 ) * gui.canvas.height / 4.8;
+            gui.ctx.fillRect(xx, yy, wid, hei);
+          }
+      }
+    }
+};
+
+gui.drawSample = function(sample) {
+  if ( sample.y === 1) {
+    gui.ctx.fillStyle = 'red';
+  } else if ( sample.y === -1){
+    gui.ctx.fillStyle = "green";
+  }
+
+  var xx = (sample.x[0] + 2.4 ) * gui.canvas.width / 4.8;
+  var yy = (2.4 - sample.x[1]) * gui.canvas.height / 4.8;
+
+  gui.ctx.beginPath();
+  gui.ctx.arc(xx, yy, 3, 0, 2 * Math.PI, false);
+  gui.ctx.fill();
+}
+
+gui.onFrameClick = function(evt) {
+  var rect = this.getBoundingClientRect();
+  var x = evt.clientX - rect.left;
+  var y = evt.clientY - rect.top;
+
+  var xx = 4.8 * x / gui.canvas.width  - 2.4;
+  var yy = 2.4 - 4.8 * y / gui.canvas.height;
+
+  var x = [xx, yy];
+  var sample = {'x':x, 'y':gui.currentValue};
+  g.samples.push(sample);
+
+  gui.drawSample(sample);
+};
+</script>
+
+
+</html>

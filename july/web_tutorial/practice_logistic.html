@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <title>七月算法－机器学习课程实验</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <link rel="shortcut icon" href="http://julyedu.com/favicon.ico" type="image/x-icon" />
+
+    <link rel="stylesheet" href="css/lib/bootstrap.min.css">
+    <link rel="stylesheet" href="css/lib/bootstrap-theme.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.structure.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.theme.min.css">
+
+    <link rel="stylesheet" href="css/mystyle.css">
+</head>
+<body>
+
+<blockquote>
+<h2>机器学习课程实验: <small>Logistic Regression</small></h2>
+</blockquote>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+### 1 算法实现
+
+逻辑回归是一个非常实用，而且有效的分类算法。
+因为其模型较为简单，解释清晰，通常是实现分类的“优先”算法。
+
+算法的目的是找到一组线性权重$\theta$，使得分类的Sigmod函数损失最小。
+最常用优化算法是 SGD 算法。
+
+Logistic 回归采用的是sigmoid函数作为二分类的概率输出，定义如下：
+
+$$
+h_{\theta}(x) =\frac{1}{1+e\^{-\theta\^Tx}}
+$$
+
+对已知样本来说，0／1分类的概率可以表示为：
+
+$$
+p(y|x) = (1-h_{\theta}(x))\^{(1-y)} * h_{\theta}(x)\^y, y=0,1
+$$
+
+我们采用最大似然估计来计算参数 $\theta$。假设存在 m 个已知样本，那么最大似然估计对数形式可以表示为：
+
+$$
+\begin{align}
+l(\theta) &= log L(\theta) \\\\
+          &= \sum_{i=1}^m {(1-y^{(i)})} log (1-h_{\theta}(x^{(i)})) + {y^{(i)}} log (h_{\theta}(x^{(i)}))
+\end{align}
+$$
+
+逻辑回归求解就是寻找最大化上式的参数 $\theta$，很显然这也是一个凸优化问题，可以采用经典的随机梯度**上升**方法来计算。
+
+#### 1.1 所使用到的公式
+
+在梯度上升计算中，参数 $\theta$ 中每项更新计算如下：
+
+$$
+\theta_j := \theta_j + \alpha (y\^{(i)}-h_{\theta}(x\^{(i)})) x_j\^{(i)}
+$$
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+
+var logistic = {};
+logistic.lamb = 0.001;
+logistic.alpha = 0.1;
+
+logistic.train = function(data, maxIterate) {
+    // 初始化theta，初始值为0
+    logistic.theta = new Array(data[0].x.length+1);
+    for(var i = 0; i < logistic.theta.length ; i++) {
+        logistic.theta[i] = 0.0;
+    }
+
+    // 要把数据整理为齐次形式（即x0=1)
+    for (var i = 0; i < data.length; i++){
+        data[i].x.unshift(1.0); // 在数组 data[i].x 的头上插入数据 1.0
+    }
+
+    // 随机梯度下降（上升）算法实现
+    for (var i = 0; i < maxIterate; i++) {
+        // 遍历所有样本，每个样本都更新参数
+        for (var j = 0; j < data.length; j++) {
+
+            var thetaX = 0.0;
+            for(var k = 0; k < logistic.theta.length; k++) {
+               thetaX = thetaX + logistic.theta[k] * data[j].x[k];
+            }
+            var hTheta = sigmoid(thetaX);
+
+            // 计算梯度并且更新参数
+            for (var k = 0; k < logistic.theta.length; k++ ) {
+                // 计算梯度
+                var deltaTheta_k = (data[j].y - hTheta) * data[j].x[k];
+                // 更新参数
+                logistic.theta[k] = logistic.theta[k] + logistic.alpha * deltaTheta_k
+                                                      - logistic.lamb * logistic.theta[k];
+            }
+        }
+    }
+
+    // 去掉齐次项
+    for (var i = 0; i < data.length; i++){
+        data[i].x.shift(1);
+    }
+
+    return;
+};
+
+logistic.pred = function(x) {
+    x.unshift(1.0);
+
+    var thetaX = 0.0;
+    for(var k = 0; k < logistic.theta.length; k++) {
+       thetaX = thetaX + logistic.theta[k] * x[k];
+    }
+    var hTheta = sigmoid(thetaX);
+
+    x.shift(1.0);
+    return hTheta;
+}
+
+// 辅助函数
+var sigmoid = function(x) {
+    return 1 / (1+ Math.exp(-1*x));
+}
+    </pre>
+  </div>
+
+</div>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 1.2 关于维度扩展
+
+为了应对处理那些非线性的分类问题，一个常用的技巧在已有的特征进行维度扩展。
+
+如下面所示，扩展到2阶的形式：
+
+$$
+x_0, x_1, x_0x_1, x^{2}_0, x^{2}_1
+$$
+
+  </div>
+
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+/// 注意这是一个2D数据的stupid的维度扩展函数
+var expand = function(x, degree) {
+  for(var d = 2; d <= degree; d++) {
+      for(var i = 0; i <= d; i++) {
+          x.push(expComb(x, d, i));
+      }
+  }
+}
+
+var expComb = function(x, d, da) {
+  var a = 1.0;
+  var b = 1.0;
+
+  for (var i = 0; i < da; i++) {
+    a = a * x[0];
+  }
+  for (var i = da; i < d; i++) {
+    b = b * x[1];
+  }
+  return a*b;
+}
+    </pre>
+  </div>
+</div>
+
+
+<div class="markdown">
+---
+### 2. LR 实现验证
+
+下面将以一个二维简单例子来测试我们的实现代码。
+测试代码：
+</div>
+
+<div class="row">
+  <div class="col-xs-12 col-md-5">
+
+    <div class="btn-toolbar" role="toolbar">
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-warning btn-sm" id="btnClear">清空</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-info btn-sm" id="btnSelectP">P样本：1</button>
+        <button type="button" class="btn btn-info btn-sm" id="btnSelectN">N样本：0</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-primary btn-sm" id="btnTest">测试</button>
+      </div>
+    </div>
+    <div class="well" style="margin-top:5px;">
+      <div style="width:360px;height:360px:margin:0px">
+        <canvas id="dataFrame" style="width:360px;height:360px">
+        </canvas>
+      </div>
+    </div>
+
+    <div class="markdown">
+
+实验和思考题：
+
++ 剃度下降算法$\alpha$如何确定？
++ $\lambda$ 参数控制的效果?
++ 实现一个mini batch剃度上升算法
++ 实现一个任意的维度扩展实现
++ 对大批量的数据，可以实现分布式优化嘛？
+
+    </div>
+
+  </div>
+  <div class="col-xs-12 col-md-7">
+    <div class="well kernel">
+      <pre>
+var doTest = function() {
+    logistic.lamb = 0.000;
+    logistic.alpha = 0.01;
+
+    // 对样本作维度扩展
+    /*
+    var degree = 3;
+    for(var i = 0; i < g.samples.length; i++) {
+       expand( g.samples[i].x, degree);
+    }
+    */
+
+
+    logistic.train(g.samples, 2000);
+
+    var result = {};
+    for(var x = -23; x <= 23; x += 1) {
+      for(var y = -23; y <= 23; y += 1) {
+          var sample = [x/10, y/10];
+          //expand(sample, degree);
+          var pred = logistic.pred(sample);
+          result[x/10 + ',' + y/10] = pred;
+      }
+    }
+
+    // 恢复原始样本
+    for(var i = 0; i < g.samples.length; i++) {
+       g.samples[i].x = g.samples[i].x.slice(0, 2);
+    }
+
+    console.log(g.samples);
+
+    return result;
+}
+
+      </pre>
+    </div>
+
+  </div>
+</div>
+
+</body>
+
+<script type="text/javascript" src="js/lib/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="js/lib/jquery-ui-1.11.4.min.js"></script>
+<script type="text/javascript" src="js/lib/ace/ace.js"></script>
+<script type="text/javascript" src="js/lib/remarkable.js"></script>
+<script type="text/javascript" src="js/lib/d3.min.js"></script>
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG">
+</script>
+<script type="text/javascript" src="js/index.js"></script>
+<script type="text/javascript" src="data/titanic/trainData.js"></script>
+<script type="text/javascript" src="data/titanic/testData.js"></script>
+<script type="text/javascript">
+var g = {};
+g.samples = [];
+
+var gui = {};
+gui.currentValue = 1;
+
+gui.init = function() {
+  gui.canvas = document.getElementById("dataFrame");
+  gui.canvas.width = 360;
+  gui.canvas.height = 360;
+  gui.ctx = document.getElementById("dataFrame").getContext('2d');
+
+  gui.ctx.fillStyle = 'blue';
+  gui.ctx.strokeStyle = '#003300';
+
+  gui.img = new Image();
+  gui.img.src = './images/2dground.png';
+  gui.img.addEventListener("load", function() {
+    gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  }, false);
+
+
+  // 事件
+  document.getElementById("dataFrame").addEventListener('click', gui.onFrameClick, false);
+  $("#btnSelectP").click(function(){
+      gui.currentValue = 1;
+  });
+  $("#btnSelectN").click(function(){
+      gui.currentValue = 0;
+  });
+
+  $("#btnTest").click( function(){
+      var result = doTest();
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+
+      gui.drawResult(result);
+      for(var i = 0; i < g.samples.length; i++) {
+        gui.drawSample( g.samples[i]);
+      }
+  });
+
+  $("#btnClear").click(function(){
+      g.samples = [];
+      gui.currentValue = 1;
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  });
+
+};
+
+gui.drawResult = function(result) {
+    for(var x = -23; x <= 23; x += 1) {
+      for(var y = -23; y <= 23; y += 1) {
+          var pred = result[x/10 + ',' + y/10];
+
+          if ( pred != undefined) {
+            if ( pred > 0.5) {
+               gui.ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            } else {
+               gui.ctx.fillStyle = "rgba(0, 255, 0, 0.3)";
+            }
+
+            var wid = 0.1 / 4.8 * gui.canvas.width;
+            var hei = 0.1 / 4.8 * gui.canvas.height;
+            var xx = (x/10 - 0.05 + 2.4 ) * gui.canvas.width / 4.8;
+            var yy = (2.4 - y/10 + 0.05 ) * gui.canvas.height / 4.8;
+            gui.ctx.fillRect(xx, yy, wid, hei);
+          }
+      }
+    }
+};
+
+gui.drawSample = function(sample) {
+  if ( sample.y === 1) {
+    gui.ctx.fillStyle = 'red';
+  } else {
+    gui.ctx.fillStyle = "green";
+  }
+
+  var xx = (sample.x[0] + 2.4 ) * gui.canvas.width / 4.8;
+  var yy = (2.4 - sample.x[1]) * gui.canvas.height / 4.8;
+
+  gui.ctx.beginPath();
+  gui.ctx.arc(xx, yy, 3, 0, 2 * Math.PI, false);
+  gui.ctx.fill();
+}
+
+gui.onFrameClick = function(evt) {
+  var rect = this.getBoundingClientRect();
+  var x = evt.clientX - rect.left;
+  var y = evt.clientY - rect.top;
+
+  var xx = 4.8 * x / gui.canvas.width  - 2.4;
+  var yy = 2.4 - 4.8 * y / gui.canvas.height;
+
+  var x = [xx, yy];
+  var sample = {'x':x, 'y':gui.currentValue};
+  g.samples.push(sample);
+
+  gui.drawSample(sample);
+};
+</script>
+
+
+</html>

@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <title>七月算法－机器学习课程实验</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <link rel="shortcut icon" href="http://julyedu.com/favicon.ico" type="image/x-icon" />
+
+    <link rel="stylesheet" href="css/lib/bootstrap.min.css">
+    <link rel="stylesheet" href="css/lib/bootstrap-theme.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.structure.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.theme.min.css">
+
+    <link rel="stylesheet" href="css/mystyle.css">
+</head>
+<body>
+
+<blockquote>
+<h2>机器学习课程实验 : <small>SVM 算法实现及应用</small></h2>
+</blockquote>
+
+<div class="markdown">
+---
+### 1. SMO 算法实现
+
+首先我们来实现一个完整的 SMO 算法，在次之前回顾一下 SMO 算法解决的问题。
+
+#### 1.1 SVM 最优化问题回顾
+
+首先我们把SVM对偶问题的求解目标再次写下来。
+
+* 优化目标 (软间隔的对偶问题)
+
+$$
+\newcommand{\argmin}{\mathop{\rm arg~min}\limits}
+\argmin_{\alpha_n} \varphi ＝ ( \frac{1}{2} \sum_{n=1}^N \sum_{m=1}^N \alpha_n\alpha_my_ny_mK(x_n,x_m) - \sum_{n=1}^N \alpha_n )
+$$
+
+* 约束条件
+
+$$
+C\geq\alpha_n\geq0 \\
+\sum_{n=1}^N \alpha_ny_n = 0
+$$
+
+上面两个公式说明的意思是，我们要找到一组 $\alpha_n$ , 使得公式1取得最小值，同时又满足公式2的约束条件。
+</div>
+
+<hr/>
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 1.2 代码初始化
+
+首先我们构造SVM所需要基本变量和函数
+
+其中常用的核函数公式如下：
+
+* 线性核
+
+$$
+K(x,x') = x^Tx'
+$$
+
+* 高斯核：
+
+$$
+K(x,x') = exp ( - \frac{\begin{Vmatrix}x-x'\end{Vmatrix}^2}{2{\sigma\^2}} )
+$$
+
+* 多项式核
+
+$$
+K(x,x') = (a+bx^Tx')\^c
+$$
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+var svm = {};
+
+// 定义样本数组和alpha数组
+svm.x = [];
+svm.y = [];
+svm.alphas = [];
+svm.b = 0.0;
+svm.C = 1.0;
+svm.tol = 0.0001;  // 边界条件的门限值
+svm.sigma = 0.5;  // 高斯核函数的参数
+
+// 线性核实现
+svm._linear = function(xi, xj) {
+  var sum = 0;
+  for (var d = 0; d < xi.length; d++) {
+    sum = sum + xi[d] * xj[d];
+  }
+  return sum;
+};
+
+// 高斯核实现
+svm._rbf = function(xi, xj) {
+  var sum = 0;
+  for (var d = 0; d < xi.length; d++) {
+    sum = sum + (xi[d] - xj[d])*(xi[d] - xj[d]);
+  }
+  return Math.exp(-sum/(2.0*svm.sigma*svm.sigma));
+};
+
+// 当前使用的核函数
+svm.kernel = svm._linear;
+
+    </pre>
+  </div>
+
+</div>
+
+<hr/>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 1.3 判别函数实现
+
+在求的最优解的 $\alpha_n$ 之后，我们就得到一个判别分类的超平面（函数），该函数如下：
+
+$$
+h(x') = \sum_{n=1}^N \alpha_ny_nk(x_n,x') + b
+$$
+
+我们不直接求解超平面的$w$值，而是直接带入新的$x'$进行计算，不需要（某些情况也做不到）保存$w$ 。
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+// 该函数在执行SMO算法的时候，也会被调用
+svm.pred = function(x) {
+  var ret = 0.0;
+  for(var i=0; i < svm.alphas.length; i++) {
+    ret += svm.alphas[i] * svm.y[i] * svm.kernel(x, svm.x[i]);
+  }
+  ret += svm.b;
+  return ret;
+}
+
+    </pre>
+  </div>
+</div>
+
+<hr/>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 1.4 SMO算法－步骤1：选择更新$\alpha$对
+
+我们首先选择出两个（一对）$\alpha$，选择方法是选择那些经可能像支撑向量的样本。
+实际上，其中一个$\alpha$是违法KKT条件最严重的，另外一个乘子则由另一个约束条件选取。
+
+根据KKT条件，我们可以得到满足条件的$\alpha$，具备如下属性（这里记$p_i$为判别函数返回值）。
+
+$$
+\begin{align}
+\alpha_i = 0 \Leftrightarrow y_ip_i - 1 \geq 0 \\\\
+0 < \alpha_i < C \Leftrightarrow y_ip_i - 1 = 0 \\\\
+\alpha_i = C \Leftrightarrow y_ip_i - 1\leq 0
+\end{align}
+$$
+
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+svm.checkFirstAlpha = function(i) {
+  // 计算判别错误
+  var predError = (svm.pred(svm.x[i]) - svm.y[i]) * svm.y[i];
+
+  if ( predError > svm.tol) {                 // 违反 case 1
+    if ( svm.alphas[i] > 0) {
+        return true;
+    }
+  } else if ( predError < -1 * svm.tol) {     // 违反 case 3
+    if ( svm.alphas[i] < svm.C) {
+        return true;
+    }
+  } else {                                    // 违反 case 2
+      if ( svm.alphas[i] === 0 || svm.alphas[i] === svm.C) {
+          return true;
+      }
+  }
+
+  return false;
+};
+
+// 这里采用最简单的方法，实践中有许多选择第二个alpha的方法
+svm.selectSecondAlpha = function(first) {
+    var second = first;
+    while(second === first) {
+        second = Math.floor(Math.random()*svm.alphas.length); // 0 ~ N
+    }
+    return second;
+};
+
+    </pre>
+  </div>
+</div>
+
+<hr>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 1.5 SMO算法－步骤2：更新$\alpha_i$ 以及 $\alpha_j$
+
+* 约束框计算
+
+我们必须在一个约束条件下来更新$\alpha$
+
+$$
+\begin{align}
+\alpha_i y_i + \alpha_j y_j = \xi \\\\
+0 <= \alpha_i <= C  \\\\
+0 <= \alpha_j <= C
+\end{align}
+$$
+
+即必须保证$\alpha_i, \alpha_j$在如下图所示矩形框内：
+
+![alpha对约束](./images/smo_alpha_pair.png)
+
+* 根据$\frac{d\varphi}{d\alpha_j}=0$来更新$\alpha_j$
+
+$$
+\begin{align}
+\eta = K(x_i,x_i)+K(x_j,x_j)-2K(x_i,x_j) \\\\
+\alpha_j\^{new} = \alpha_j\^{old} + y_j\frac{E_i - E_j}{\eta}
+\end{align}
+$$
+
+
+
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+svm.getBoundaryOfSecond = function(i, j) {
+  var box = {};
+  box.L = 0;
+  box.H = svm.C;
+  if ( svm.y[i] === svm.y[j]) {
+      box.L = Math.max(0, svm.alphas[i] + svm.alphas[j] - svm.C);
+      box.H = Math.min(svm.C, svm.alphas[i] + svm.alphas[j]);
+  } else {
+    box.L = Math.max(0, svm.alphas[j] - svm.alphas[i]);
+    box.H = Math.min(svm.C, svm.C + svm.alphas[j] - svm.alphas[i]);
+  }
+  return box;
+};
+
+svm.updateAlphaPair = function(i,j ) {
+  var box = svm.getBoundaryOfSecond(i,j);
+  if ( box.H === box.L ) {
+    return false;   // 无法更新
+  }
+
+  var Ei = svm.pred(svm.x[i]) - svm.y[i];
+  var Ej = svm.pred(svm.x[j]) - svm.y[j];
+
+  var eta = svm.kernel(svm.x[i], svm.x[i]) + svm.kernel(svm.x[j], svm.x[j])
+            - 2 * svm.kernel(svm.x[i], svm.x[j]);
+
+  if ( Math.abs(eta) < 0.000001) {
+      return false;
+  }
+
+  var aj_new = svm.alphas[j] + svm.y[j]*(Ei-Ej)/eta;
+
+  if (aj_new > box.H) {
+    aj_new = box.H;
+  } else if ( aj_new < box.L) {
+    aj_new = box.L;
+  }
+
+  if ( Math.abs(aj_new - svm.alphas[j]) < svm.tol) {
+    return false;  // 更新太小，放弃这次更新
+  }
+
+  svm.alphas[i] += svm.y[i]*svm.y[j]*(svm.alphas[j] - aj_new);
+  svm.alphas[j] = aj_new;
+
+  return true;
+};
+
+    </pre>
+  </div>
+</div>
+
+<hr/>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 1.6 SMO算法－步骤3：如何更新$b$
+
+在我们更新了$\alpha_i, \alpha_j$之后，那么可以根据KKT条件，来更新b。
+
+* 第一情况，$\alpha_i, \alpha_j$ 至少有一个支撑向量
+
+如果更新后的$\alpha$满足$ 0 < \alpha_i < C $, 或者 $ 0 < \alpha_j < C $，
+那说明$i$或者$j$处于支撑向量的位置，那么 $y_ip_i - 1 = 0$, 由此可以更新$b$ 。
+
+* 第二种情况，$\alpha_i, \alpha_j$ 同为0或同为C
+
+如果均为0，说明样本$i$ 和 $j$ 都是正确分类的样本，那么由前面的图可以知道，一个是正样本，一个是负样本。
+因此$b$夹在两个样本中间都满足KKT条件，我们可以选择中间的值。
+
+如果均为0，说明样本$i$ 和 $j$ 都是错误分类的样本，那么由前面的图可以知道，一个是正样本，一个是负样本。
+因此$b$夹在两个样本中间都满足KKT条件，我们可以选择中间的值。
+
+* 第三种情况，$\alpha_i, \alpha_j$ 分别为0和C
+
+根据KKT条件，如果两个样本的算子分别为0和C，说明一个分错了，一个完全分对了。
+又根据前面的图示，那么必须是同时是正样本或者负样本，因此$b$夹在两个样本中间都满足KKT条件，我们可以选择中间的值。
+
+![b值更新](./images/smo_b_update.png)
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+svm.updateBias = function(i,j) {
+  var pi = svm.pred(svm.x[i]);
+  var pj = svm.pred(svm.x[j]);
+  var bi = svm.y[i] - (pi - svm.b);
+  var bj = svm.y[j] - (pj - svm.b);
+
+  if ( svm.alphas[i] > 0 && svm.alphas[i] < svm.C ){
+      svm.b = bi;
+  } else if ( svm.alphas[j] > 0 && svm.alphas[j] < svm.C ) {
+      svm.b = bj;
+  } else {
+      svm.b = (bi+bj)/2;
+  }
+};
+
+    </pre>
+  </div>
+</div>
+
+<hr/>
+<div class="markdown">
+#### 1.7 完整的SMO算法
+
+有了上面这些函数，就可以构造完整的SMO 优化算法
+</div>
+<div class="kernel well">
+  <pre>
+svm.train = function(maxIterate) {
+    var noChange = 0;
+    for(var i = 0; i < maxIterate; i++) {
+        if (noChange >= 10) {        // 连续10次没有更新alpha就结束
+            return false;
+        }
+
+        var changed = false;
+        for(var j = 0; j < svm.alphas.length; j++) {
+            if ( svm.checkFirstAlpha(j) === true){
+                var second = svm.selectSecondAlpha(j);
+                if ( svm.updateAlphaPair(j, second) === true) {
+                    svm.updateBias(j, second);
+                    changed = true;
+                }
+            }
+        }
+        if(changed === false) {
+            noChange ++;
+        } else {
+            noChange = 0;
+        }
+    }
+
+    return true;
+};
+  </pre>
+</div>
+
+<div class="markdown">
+---
+### 2. SVM 实现验证
+
+下面将以一个二维简单例子来测试我们的实现代码。
+测试代码：
+</div>
+
+<div class="row">
+  <div class="col-xs-12 col-md-5">
+
+    <div class="btn-toolbar" role="toolbar">
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-warning btn-sm" id="btnClear">清空</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-info btn-sm" id="btnSelectP">P样本：+1</button>
+        <button type="button" class="btn btn-info btn-sm" id="btnSelectN">N样本：-1</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-primary btn-sm" id="btnTest">测试</button>
+      </div>
+    </div>
+    <div class="well" style="margin-top:5px;">
+      <div style="width:360px;height:360px:margin:0px">
+        <canvas id="dataFrame" style="width:360px;height:360px">
+        </canvas>
+      </div>
+    </div>
+
+    <div class="markdown">
+
+实验项目：
+
++ 1. $\alpha$ 和 支撑向量的关系
++ 2. 核函数的区别
++ 3. C 参数的选择
++ 4. 高斯核函数中的$\sigma$选择
+
+    </div>
+
+  </div>
+  <div class="col-xs-12 col-md-7">
+    <div class="well kernel">
+      <pre>
+// 注意：数据保存在 g.samples 变量
+var loadData = function() {
+    // 加载样本数据
+    svm.alphas = [];
+    svm.x = [];
+    svm.y = [];
+    for(var i = 0; i < g.samples.length; i++) {
+      svm.x.push( g.samples[i].x );
+      svm.y.push( g.samples[i].y );
+      svm.alphas.push(0.0);
+    }
+
+    // 初始化参数
+    svm.C = 1.0;
+    svm.b = 0;
+    svm.sigma = 0.5;
+    svm.kernel = svm._linear;
+};
+
+
+// 按下测试按钮，下面的函数将被调用
+var doTest = function() {
+    loadData();
+
+    svm.train(2000);
+
+    var result = {};
+    for(var x = -230; x <= 230; x += 5) {
+      for(var y = -230; y <= 230; y += 5) {
+          var sample = [x/100, y/100];
+          var pred = svm.pred(sample, 2);
+          if ( pred >= 1) {
+            pred = 2;
+          } else if ( pred <= -1) {
+            pred = -2;
+          } else if (pred > 0) {
+            pred = 1;
+          } else {
+            pred = -1;
+          }
+          result[x/100 + ',' + y/100] = pred;
+      }
+    }
+
+    return result;
+}
+
+      </pre>
+    </div>
+
+  </div>
+</div>
+
+<hr/>
+
+<div class="markdown">
+### 3. Kaggle 数据实践
+
+#### 3.1. 数据概要
+Kaggle数据竞赛网站 https://www.kaggle.com/c/titanic/ 上面的数据例子，预测泰坦尼克号生存人员。
+我们也可以使用SVM算法来进行预测。首先我们来看看800多个样本的训练数据组成：
+
+```
+VARIABLE DESCRIPTIONS:
+survival        Survival
+                (0 = No; 1 = Yes)
+pclass          Passenger Class
+                (1 = 1st; 2 = 2nd; 3 = 3rd)
+name            Name
+sex             Sex
+age             Age
+sibsp           Number of Siblings/Spouses Aboard
+parch           Number of Parents/Children Aboard
+ticket          Ticket Number
+fare            Passenger Fare
+cabin           Cabin
+embarked        Port of Embarkation
+                (C = Cherbourg; Q = Queenstown; S = Southampton)
+```
+
+</div>
+<div class="well kernel">
+  <pre>
+// 简单的看一下样本数据
+console.log('train Number = ' + trainData_titanic.length + ' test Number = ' + testData_titanic.length);
+console.log(trainData_titanic[11]);
+console.log(trainData_titanic[10]);
+console.log(trainData_titanic[100]);
+
+  </pre>
+</div>
+
+<div class="markdown">
+#### 3.2. 数据预处理
+
+我们首先需要把离散变量、字符串变量、空变量统一处理为数值变量。
+</div>
+
+<div class="well kernel">
+  <pre>
+
+var convertTitanicSample = function(ts) {
+    var sample = {};
+
+    if ( ts.survived === undefined) {
+      sample.y = 0;
+    } else if ( ts.survived === '1') {
+      sample.y = +1;
+    } else {
+      sample.y = -1;
+    }
+
+    sample.x = [];
+    // 0.性别
+    if (ts.sex === 'male') {
+      sample.x[0] = 2;
+    } else {
+      sample.x[0] = -2;
+    }
+
+    // 1.姓名，从字符串中提取 Mrs. Dr. Rev. Mr. Miss. Master.
+    if ( ts.name.indexOf('Mr.') > 0) {
+      sample.x[1] = 2;
+    } else if ( ts.name.indexOf('Mrs.') > 0) {
+      sample.x[1] = -2;
+    } else if ( ts.name.indexOf('Miss.') > 0) {
+      sample.x[1] = -1;
+    } else if ( ts.name.indexOf('Rev.') > 0 || ts.name.indexOf('Dr.') || ts.name.indexOf('Master.')> 0) {
+      sample.x[1] = 1;
+    } else {
+      sample.x[1] = 0;
+    }
+
+    // 2.年龄，归一化到 -2 ~ +2
+    var age = parseFloat(ts.age);
+    if (isNaN(age)) {
+        age = 25;
+    } else if ( ts.age > 50 ) {
+      age = 50;
+    }
+
+    sample.x[2] = -2 + age / 50.0 * 4;
+
+    // 3.class
+    if ( ts.pclass === '1') {
+      sample.x[3] = 2;
+    } else if ( ts.pclass === '3') {
+      sample.x[3] = -2;
+    } else {
+      sample.x[3] = 0;
+    }
+
+    // 4. sibsp
+    var sibsp = parseInt(ts.sibsp);
+    if ( sibsp > 0) {
+      sample.x[4] = 2;
+    } else {
+      sample.x[4] = -2;
+    }
+
+    // 5. parch
+    var parch = parseInt(ts.parch);
+    if ( parch > 0) {
+      sample.x[5] = 2;
+    } else {
+      sample.x[5] = -2;
+    }
+
+    // 6. fare 归一化到-2 ~ +2
+    var fare = parseFloat(ts.fare);
+    if(fare > 100) {
+      fare = 100;
+    }
+    sample.x[6] = -2 + fare/100*4;
+
+    // 7. embarked
+    if (ts.embarked === 'Q') {
+      sample.x[7] = 2;
+    } else if ( ts.embarked === 'C') {
+      sample.x[7] = -2;
+    } else {
+      sample.x[7] = 0;
+    }
+
+    return sample;
+};
+
+var convertAllSamples = function() {
+    g.samples = [];
+    for(var i = 0; i < trainData_titanic.length; i++) {
+      sample = convertTitanicSample(trainData_titanic[i]);
+      g.samples.push(sample);
+    }
+
+    g.testSamples = [];
+    for(var i = 0; i < testData_titanic.length; i++) {
+      sample = convertTitanicSample(testData_titanic[i]);
+      g.testSamples.push(sample);
+    }
+
+};
+
+// 将数据加载到g.samples上
+convertAllSamples();
+
+
+
+  </pre>
+</div>
+
+<div class="markdown">
+---
+#### 3.3 选择合适的参数构造SVM
+
++ 线性核，C ~ [5, 10, 50, 100];
+
++ 高斯核，C ~ [5, 10, 50, 100], Sigma ~ [1.0, 2.0, 5.0, 10.0];
+
++ 采用其他核函数
+
+</div>
+
+<div class="well kernel">
+  <pre>
+
+// 注意：数据保存在 g.samples 变量
+var loadTitanicData = function() {
+    // 加载样本数据
+    svm.alphas = [];
+    svm.x = [];
+    svm.y = [];
+    // 注意这里使用前500个作为训练样本，其他作为验证验本
+    for(var i = 0; i < 500; i++) {
+      svm.x.push( g.samples[i].x );
+      svm.y.push( g.samples[i].y );
+      svm.alphas.push(0.0);
+    }
+
+    // 初始化参数
+    svm.C = 5.0;
+    svm.b = 0;
+    svm.kernel = svm._linear;
+};
+
+var verifyTitanic = function() {
+  var score = 0;
+  for(var i = 500; i < g.samples.length; i++) {
+    var x = g.samples[i].x;
+    var y = g.samples[i].y;
+    var pred = svm.pred(x);
+    if ( pred > 0 && y === 1) {
+      score ++;
+    } else if ( pred < 0 && y === -1) {
+      score ++;
+    }
+  }
+
+  return score / ( g.samples.length - 500);
+};
+
+var testTitanic = function() {
+  var score = 0;
+  console.log('PassengerId,Survived');
+  for(var i = 0; i < g.testSamples.length; i++) {
+    var x = g.testSamples[i].x;
+    var y = g.testSamples[i].y;
+    var pred = svm.pred(x);
+    if ( pred > 0) {
+      console.log((i+892) + ',1' );
+    } else {
+      console.log((i+892) + ',0' );
+    }
+  }
+}
+
+var trainTitanic = function() {
+    loadTitanicData();
+
+    var isFinished = svm.train(50);
+    console.log("isFinished = " + isFinished);
+
+    var result = verifyTitanic();
+    console.log("verify result = " + result);
+
+    var result = testTitanic();
+    console.log("test result = " + result);
+}
+
+
+
+  </pre>
+</div>
+
+<div class="markdown">
+---
+### 4. libSVM 简介
+
+libSVM是是用最为广泛的开源的SVM工具，使用上非常简单。
+如果是最简单的两分类应用，只需要指定2个参数，即C和RBF核函数的Sigma，训练命令行如下：
+
+```
+./svm-train -s 0 -c 0.5 -g 0.1  test test.model
+```
+
+生成模型文件，支持向量的第一项为 y(i)*alpha(i), 例如：
+
+```
+svm_type c_svc                          %分类SVM
+kernel_type rbf                         %RBF核函数
+gamma 0.1                               %gamma 对应 高斯核函数sigma  1/(2*sigma^2) = gamma
+nr_class 2                              %2分类
+total_sv 4                              %支持向量数目
+rho -0.998178                           %判别函数的b, 注意这里用的是 y = W*x -b
+label 1 -1
+nr_sv 2 2                               %每个类别对应的边界上的向量数目，即对应alpha = C
+SV
+0.5 1:0.3 2:0.4                         %支持向量，第一个系数为 y(i)*alpha(i)
+0.5 1:0.67 2:0.7
+-0.5 1:0.28 2:0.7
+-0.5 1:0.48 2:0.5
+```
+
+</div>
+
+</body>
+
+<script type="text/javascript" src="js/lib/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="js/lib/jquery-ui-1.11.4.min.js"></script>
+<script type="text/javascript" src="js/lib/ace/ace.js"></script>
+<script type="text/javascript" src="js/lib/remarkable.js"></script>
+<script type="text/javascript" src="js/lib/d3.min.js"></script>
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG">
+</script>
+<script type="text/javascript" src="js/index.js"></script>
+<script type="text/javascript" src="data/titanic/trainData.js"></script>
+<script type="text/javascript" src="data/titanic/testData.js"></script>
+<script type="text/javascript">
+  var g = {};
+  g.samples = [];
+
+  var gui = {};
+  gui.currentValue = 1;
+
+  gui.init = function() {
+    gui.canvas = document.getElementById("dataFrame");
+    gui.canvas.width = 360;
+    gui.canvas.height = 360;
+    gui.ctx = document.getElementById("dataFrame").getContext('2d');
+
+    gui.ctx.fillStyle = 'blue';
+    gui.ctx.strokeStyle = '#003300';
+
+    gui.img = new Image();
+    gui.img.src = './images/2dground.png';
+    gui.img.addEventListener("load", function() {
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+    }, false);
+
+
+    // 事件
+    document.getElementById("dataFrame").addEventListener('click', gui.onFrameClick, false);
+    $("#btnSelectP").click(function(){
+        gui.currentValue = 1;
+    });
+    $("#btnSelectN").click(function(){
+        gui.currentValue = -1;
+    });
+
+    $("#btnTest").click( function(){
+        var margin = doTest();
+
+        gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+
+        gui.drawMargin(margin);
+
+        for(var i = 0; i < g.samples.length; i++) {
+          gui.drawSample( g.samples[i]);
+        }
+
+    });
+
+    $("#btnClear").click(function(){
+        g.samples = [];
+        gui.currentValue = 1;
+        gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+    });
+
+  };
+
+  gui.drawMargin = function(result) {
+    for(var x = -230; x <= 230; x += 5) {
+      for(var y = -230; y <= 230; y += 5) {
+          var pred = result[x/100 + ',' + y/100];
+
+          if ( pred != undefined) {
+            if ( pred === 2) {
+               gui.ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            } else if ( pred === -2) {
+               gui.ctx.fillStyle = "rgba(0, 255, 0, 0.3)";
+            } else if ( pred === 1) {
+               gui.ctx.fillStyle = 'rgba(128, 0, 0, 0.3)';
+            } else if ( pred === -1) {
+               gui.ctx.fillStyle = "rgba(0, 128, 0, 0.3)";
+            }
+
+            var wid = 0.05 / 4.8 * gui.canvas.width;
+            var hei = 0.05 / 4.8 * gui.canvas.height;
+            var xx = (x/100 - 0.025 + 2.4 ) * gui.canvas.width / 4.8;
+            var yy = (2.4 - y/100 + 0.025 ) * gui.canvas.height / 4.8;
+            gui.ctx.fillRect(xx, yy, wid, hei);
+          }
+      }
+    }
+  };
+
+  gui.drawSample = function(sample) {
+    if ( sample.y === 1) {
+      gui.ctx.fillStyle = 'red';
+    } else {
+      gui.ctx.fillStyle = "green";
+    }
+
+    var xx = (sample.x[0] + 2.4 ) * gui.canvas.width / 4.8;
+    var yy = (2.4 - sample.x[1]) * gui.canvas.height / 4.8;
+
+    gui.ctx.beginPath();
+    gui.ctx.arc(xx, yy, 3, 0, 2 * Math.PI, false);
+    gui.ctx.fill();
+  }
+
+  gui.onFrameClick = function(evt) {
+    var rect = this.getBoundingClientRect();
+    var x = evt.clientX - rect.left;
+    var y = evt.clientY - rect.top;
+
+    var xx = 4.8 * x / gui.canvas.width  - 2.4;
+    var yy = 2.4 - 4.8 * y / gui.canvas.height;
+
+    var x = [xx, yy];
+    var sample = {'x':x, 'y':gui.currentValue};
+    g.samples.push(sample);
+
+    gui.drawSample(sample);
+  };
+</script>
+
+
+</html>
