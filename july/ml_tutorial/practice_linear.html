@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <title>人人都会机器学习－机器学习课程实验</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+
+    <link rel="stylesheet" href="css/lib/bootstrap.min.css">
+    <link rel="stylesheet" href="css/lib/bootstrap-theme.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.structure.min.css">
+    <link rel="stylesheet" href="css/lib/jquery-ui.theme.min.css">
+
+    <link rel="stylesheet" href="css/mystyle.css">
+</head>
+<body>
+
+<blockquote>
+<h2>机器学习课程实验: <small>线性回归</small></h2>
+</blockquote>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+### 1 算法实现
+
+带正则化的，线性模型公式，可以表示：
+
+$$
+obj = \frac{1}{2}\sum_{i=1}^{m} (W^T x^{i} + b - y^{i} )^{2} + \frac{1}{2}\lambda W^T W
+$$
+
+
+  </div>
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+
+var linear = {};
+linear.lambda = 0.001;
+linear.alpha = 0.01;
+
+linear.train = function(data, maxIterate) {
+    // 初始化w，初始值为0
+    linear.w = new Array(data[0].x.length+1);
+    linear.dw = new Array(data[0].x.length+1);
+    for(var i = 0; i < linear.w.length ; i++) {
+        linear.w[i] = 0.0;
+        linear.dw[i] = 0.0;
+    }
+
+    // 要把数据整理为齐次形式（即x0=1)
+    for (var i = 0; i < data.length; i++){
+        data[i].x.unshift(1.0); // 在数组 data[i].x 的头上插入数据 1.0
+    }
+
+    // 随机梯度下降算法实现
+    for (var i = 0; i < maxIterate; i++) {
+
+        for(var j = 0; j < linear.w.length ; j++) {
+            linear.dw[j] = linear.w[j] * linear.lambda
+        }
+
+        // 遍历所有样本，每个样本都更新参数
+        for (var j = 0; j < data.length; j++) {
+
+            var z = 0.0;
+            for(var k = 0; k < linear.w.length ; k++) {
+                z = z + linear.w[k] * data[j].x[k];
+            }
+            var dz = z - data[j].y;
+
+            // 计算梯度
+            for (var k = 0; k < linear.w.length; k++ ) {
+                linear.dw[k] = linear.dw[k] + data[j].x[k] * dz;
+            }
+        }
+
+        // 更新w
+        for(var j = 0; j < linear.w.length ; j++) {
+            linear.w[j] = linear.w[j] - linear.alpha * linear.dw[j]
+        }
+    }
+
+    // 去掉齐次项
+    for (var i = 0; i < data.length; i++){
+        data[i].x.shift(1);
+    }
+    return;
+};
+
+linear.pred = function(x) {
+    x.unshift(1.0);
+
+    var z = 0.0;
+    for(var k = 0; k < linear.w.length; k++) {
+       z = z + linear.w[k] * x[k];
+    }
+
+    x.shift(1.0);
+    return z;
+};
+    </pre>
+  </div>
+
+</div>
+
+<div class="row">
+  <div class="markdown col-xs-12 col-md-5">
+
+#### 1.2 关于维度扩展
+
+为了应对处理那些非线性的分类问题，一个常用的技巧在已有的特征进行维度扩展。
+
+如下面所示，扩展到2阶的形式：
+
+$$
+x_0, x_1, x_0x_1, x^{2}_0, x^{2}_1
+$$
+
+  </div>
+
+  <div class="col-xs-12 col-md-7 kernel well">
+    <pre>
+
+var expand = function(x, degree) {
+  for(var d = 2; d <= degree; d++) {
+      var xd = 1.0;
+      for(var i = 0; i < d; i++) {
+          xd = xd * x[0];
+      }
+      x.push(xd)
+  }
+}
+
+    </pre>
+  </div>
+</div>
+
+
+<div class="markdown">
+---
+### 2. LR 实现验证
+
+下面将以一个二维简单例子来测试我们的实现代码。
+测试代码：
+</div>
+
+<div class="row">
+  <div class="col-xs-12 col-md-5">
+
+    <div class="btn-toolbar" role="toolbar">
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-warning btn-sm" id="btnClear">清空</button>
+      </div>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-primary btn-sm" id="btnTest">测试</button>
+      </div>
+    </div>
+    <div class="well" style="margin-top:5px;">
+      <div style="width:360px;height:360px:margin:0px">
+        <canvas id="dataFrame" style="width:360px;height:360px">
+        </canvas>
+      </div>
+    </div>
+
+    <div class="markdown">
+
+实验和思考题：
+
++ 剃度下降算法$\alpha$如何确定？
++ $\lambda$ 参数控制的效果?
++ 实现一个mini batch剃度上升算法
++ 实现一个任意的维度扩展实现
++ 对大批量的数据，可以实现分布式优化嘛？
+
+    </div>
+
+  </div>
+  <div class="col-xs-12 col-md-7">
+    <div class="well kernel">
+      <pre>
+var doTest = function() {
+    linear.lamb = 0.000;
+    linear.alpha = 0.001;
+
+    // 对样本作维度扩展
+    var degree = 2;
+    for(var i = 0; i < g.samples.length; i++) {
+       expand( g.samples[i].x, degree);
+    }
+
+
+    linear.train(g.samples, 100);
+
+    var result = {};
+    for(var x = -23; x <= 23; x += 1) {
+        var sample = [x/10];
+        expand(sample, degree);
+        var pred = linear.pred(sample);
+        result['' + x/10] = pred;
+    }
+
+    // 恢复原始样本
+    for(var i = 0; i < g.samples.length; i++) {
+       g.samples[i].x = g.samples[i].x.slice(0, 1);
+    }
+
+    return result;
+}
+
+      </pre>
+    </div>
+
+  </div>
+</div>
+
+</body>
+
+<script type="text/javascript" src="js/lib/jquery-1.11.3.min.js"></script>
+<script type="text/javascript" src="js/lib/jquery-ui-1.11.4.min.js"></script>
+<script type="text/javascript" src="js/lib/ace/ace.js"></script>
+<script type="text/javascript" src="js/lib/remarkable.js"></script>
+<script type="text/javascript" src="js/lib/d3.min.js"></script>
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG">
+</script>
+<script type="text/javascript" src="js/index.js"></script>
+<script type="text/javascript" src="data/titanic/trainData.js"></script>
+<script type="text/javascript" src="data/titanic/testData.js"></script>
+<script type="text/javascript">
+var g = {};
+g.samples = [];
+
+var gui = {};
+gui.currentValue = 1;
+
+gui.init = function() {
+  gui.canvas = document.getElementById("dataFrame");
+  gui.canvas.width = 360;
+  gui.canvas.height = 360;
+  gui.ctx = document.getElementById("dataFrame").getContext('2d');
+
+  gui.ctx.fillStyle = 'blue';
+  gui.ctx.strokeStyle = '#003300';
+
+  gui.img = new Image();
+  gui.img.src = './images/2dground.png';
+  gui.img.addEventListener("load", function() {
+    gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  }, false);
+
+
+  // 事件
+  document.getElementById("dataFrame").addEventListener('click', gui.onFrameClick, false);
+  $("#btnTest").click( function(){
+
+      var result = doTest();
+
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+      gui.drawResult(result);
+
+      for(var i = 0; i < g.samples.length; i++) {
+        gui.drawSample( g.samples[i]);
+      }
+  });
+
+  $("#btnClear").click(function(){
+      g.samples = [];
+      gui.ctx.drawImage(gui.img, 0, 0, gui.canvas.width, gui.canvas.height);
+  });
+};
+
+gui.drawResult = function(result) {
+    gui.ctx.fillStyle = 'green';
+    for(var x = -23; x <= 23; x += 1) {
+        var pred = result['' + x/10];
+        if ( pred != undefined) {
+          var wid = 0.1 / 4.8 * gui.canvas.width;
+          var hei = 0.1 / 4.8 * gui.canvas.height;
+          var xx = (x/10 - 0.05 + 2.4 ) * gui.canvas.width / 4.8;
+          var yy = (2.4 - pred + 0.05 ) * gui.canvas.height / 4.8;
+          gui.ctx.beginPath();
+          gui.ctx.arc(xx, yy, 3, 0, 2 * Math.PI, false);
+          gui.ctx.fill();
+        }
+    }
+};
+
+gui.drawSample = function(sample) {
+  gui.ctx.fillStyle = 'red';
+
+  var xx = (sample.x[0] + 2.4 ) * gui.canvas.width / 4.8;
+  var yy = (2.4 - sample.y) * gui.canvas.height / 4.8;
+
+  gui.ctx.beginPath();
+  gui.ctx.arc(xx, yy, 3, 0, 2 * Math.PI, false);
+  gui.ctx.fill();
+}
+
+gui.onFrameClick = function(evt) {
+  var rect = this.getBoundingClientRect();
+  var x = evt.clientX - rect.left;
+  var y = evt.clientY - rect.top;
+
+  var xx = 4.8 * x / gui.canvas.width  - 2.4;
+  var yy = 2.4 - 4.8 * y / gui.canvas.height;
+
+  var x = [xx];
+  var sample = {'x':x, 'y':yy};
+  g.samples.push(sample);
+
+  gui.drawSample(sample);
+};
+</script>
+
+
+</html>
