@@ -1,0 +1,9 @@
+{
+  "name": "ecj",
+  "description": "An easy Convlution Neural Network library by Javascript",
+  "author": "Zhou Chang <achang.zhou@gmail.com>",
+  "dependencies": {
+    "pngjs": "*",
+    "jpeg-js": "*"
+  }
+}

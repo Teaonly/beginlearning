@@ -15,4 +15,6 @@ Beginlearning
 
     Shared lectures and notes for julyedu.com
 
-
+4. easyLearning.js
+    
+    A old deep learning js framework.
